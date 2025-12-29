@@ -78,7 +78,7 @@ The scraper runs automatically every day at midnight UTC and can also be trigger
 1. Go to your repository settings: https://github.com/adrianpawlas/scraper-footshop-eu/settings/secrets/actions
 2. Add the following secrets:
    - `SUPABASE_URL`: Your Supabase project URL
-   - `SUPABASE_KEY`: Your Supabase anon (public) key
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service_role key (bypasses RLS for full database access)
 
 #### Manual Triggers
 
