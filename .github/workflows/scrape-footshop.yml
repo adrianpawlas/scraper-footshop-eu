@@ -1,0 +1,107 @@
+name: Scrape Footshop EU Products
+
+on:
+  # Run daily at midnight UTC
+  schedule:
+    - cron: '0 0 * * *'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Batch size for processing products'
+        required: false
+        default: '10'
+        type: string
+      limit:
+        description: 'Maximum number of products to scrape (0 = unlimited)'
+        required: false
+        default: '0'
+        type: string
+      mode:
+        description: 'Scraping mode'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - test
+      test_limit:
+        description: 'Limit for test mode'
+        required: false
+        default: '50'
+        type: string
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720  # 12 hours = 720 minutes
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Create environment file
+      run: |
+        echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+        echo "SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}" >> .env
+
+    - name: Run Footshop scraper
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: |
+        if [ "${{ github.event.inputs.mode }}" == "test" ]; then
+          echo "Running in test mode with limit ${{ github.event.inputs.test_limit }}"
+          python main.py --mode full --batch-size 5 --limit ${{ github.event.inputs.test_limit }}
+        else
+          BATCH_SIZE="${{ github.event.inputs.batch_size }}"
+          LIMIT="${{ github.event.inputs.limit }}"
+
+          # Set defaults if not provided via manual trigger
+          if [ -z "$BATCH_SIZE" ]; then BATCH_SIZE="10"; fi
+          if [ -z "$LIMIT" ] || [ "$LIMIT" == "0" ]; then LIMIT=""; else LIMIT="--limit $LIMIT"; fi
+
+          echo "Running full scrape with batch_size=$BATCH_SIZE $LIMIT"
+          python main.py --mode full --batch-size $BATCH_SIZE $LIMIT
+        fi
+
+    - name: Generate run summary
+      if: always()
+      run: |
+        echo "# Footshop EU Scraper Run Summary" >> run_summary.md
+        echo "- **Date:** $(date)" >> run_summary.md
+        echo "- **Trigger:** ${{ github.event_name }}" >> run_summary.md
+        echo "- **Run ID:** ${{ github.run_id }}" >> run_summary.md
+        echo "- **Status:** ${{ job.status }}" >> run_summary.md
+
+        if [ -f scraper.log ]; then
+          echo "- **Log size:** $(wc -l < scraper.log) lines" >> run_summary.md
+          echo "" >> run_summary.md
+          echo "## Last 50 log lines:" >> run_summary.md
+          tail -50 scraper.log >> run_summary.md
+        fi
+
+    - name: Upload run summary
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: run-summary-${{ github.run_id }}
+        path: run_summary.md
+
+    - name: Upload scraper logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scraper-logs-${{ github.run_id }}
+        path: scraper.log

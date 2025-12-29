@@ -1,0 +1,1 @@
+# Footshop EU Scraper Package
