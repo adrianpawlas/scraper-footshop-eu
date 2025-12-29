@@ -1,7 +1,7 @@
 import requests
 import torch
 from PIL import Image
-from transformers import AutoProcessor, AutoModel, SiglipImageProcessor
+from transformers import AutoProcessor, AutoModel
 from typing import List, Optional, Tuple
 import io
 import os
@@ -26,15 +26,9 @@ class ImageProcessor:
         try:
             logger.info(f"Loading SigLIP model: {model_name}")
 
-            # Try SigLIP-specific processor first
-            try:
-                self.processor = SiglipImageProcessor.from_pretrained(model_name)
-                logger.info("Using SigLIP-specific image processor")
-            except Exception as proc_e:
-                logger.warning(f"SigLIP-specific processor failed: {proc_e}, trying AutoProcessor")
-                # Fallback to AutoProcessor
-                self.processor = AutoProcessor.from_pretrained(model_name)
-                logger.info("Using AutoProcessor for SigLIP")
+            # Use AutoProcessor to get the full SigLIP processor (handles both image and text)
+            self.processor = AutoProcessor.from_pretrained(model_name)
+            logger.info("Using SigLIP processor (handles both image and text)")
 
             self.model = AutoModel.from_pretrained(model_name)
             self.model.to(self.device)
@@ -81,15 +75,21 @@ class ImageProcessor:
             raise RuntimeError("Only SigLIP embeddings are supported - no fallbacks allowed")
 
         try:
-            # Preprocess image
-            inputs = self.processor(images=image, return_tensors="pt")
+            # Preprocess image - SigLIP requires both image and text inputs
+            # For image-only embeddings, we provide an empty text
+            inputs = self.processor(
+                images=image,
+                text=[""],  # Empty text input for image-only processing
+                return_tensors="pt",
+                padding=True
+            )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
             # Generate SigLIP embedding
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                # Use the pooled output for image embeddings
-                embedding = outputs.pooler_output.squeeze().cpu().numpy()
+                # For SigLIP, use image_embeds for image-only embeddings
+                embedding = outputs.image_embeds.squeeze().cpu().numpy()
 
             # Ensure we have a 1D array
             if embedding.ndim > 1:

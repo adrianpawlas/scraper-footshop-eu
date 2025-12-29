@@ -69,6 +69,14 @@ class FootshopScraper:
 
                 # Extract image URLs
                 image_urls = self._extract_image_urls(product_data)
+                logger.debug(f"Extracted {len(image_urls)} image URLs for product: {product_data.get('name', 'Unknown')}")
+                if not image_urls:
+                    logger.warning(f"No image URLs found in product data keys: {list(product_data.keys())}")
+                    # Let's see what image-related fields exist
+                    image_fields = ['image', 'images', 'gallery', 'gallery_images', 'photos', 'pictures']
+                    for field in image_fields:
+                        if field in product_data and product_data[field]:
+                            logger.warning(f"Found {field}: {product_data[field]}")
 
                 try:
                     # Process images and generate SigLIP embedding (REQUIRED)
@@ -94,27 +102,57 @@ class FootshopScraper:
         """Extract all available image URLs from product data."""
         image_urls = []
 
-        # Try different image fields
-        image_fields = ['images', 'gallery_images', 'product_images']
+        # Handle Footshop's specific image structure
+        images_data = product_data.get('images')
+        if images_data and isinstance(images_data, dict):
+            # Add cover image
+            cover_image = images_data.get('cover_image')
+            if cover_image:
+                image_urls.append(cover_image)
+
+            # Add images from 'other' array
+            other_images = images_data.get('other', [])
+            if isinstance(other_images, list):
+                for img_obj in other_images:
+                    if isinstance(img_obj, dict):
+                        # Prefer mobile_image for full resolution, fallback to image
+                        img_url = img_obj.get('mobile_image') or img_obj.get('image')
+                        if img_url and img_url not in image_urls:
+                            image_urls.append(img_url)
+
+        # Try other image fields as fallback
+        image_fields = ['gallery_images', 'product_images']
         for field in image_fields:
             images = product_data.get(field, [])
             if images and isinstance(images, list):
                 image_urls.extend(images)
 
         # Add main image if not already included
-        main_image = product_data.get('image')
+        main_image = product_data.get('image') or product_data.get('last_image')
         if main_image and main_image not in image_urls:
             image_urls.insert(0, main_image)
 
         # Check variants for additional images
-        variants = product_data.get('variants', [])
+        variants = product_data.get('variants') or product_data.get('color_variations', [])
         if isinstance(variants, list):
             for variant in variants:
-                variant_images = variant.get('images', [])
-                if variant_images:
-                    image_urls.extend(variant_images)
+                if isinstance(variant, dict):
+                    variant_images = variant.get('images') or variant.get('image')
+                    if variant_images:
+                        if isinstance(variant_images, list):
+                            image_urls.extend(variant_images)
+                        elif isinstance(variant_images, str):
+                            image_urls.append(variant_images)
 
-        return image_urls
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_urls = []
+        for url in image_urls:
+            if url and url not in seen:
+                seen.add(url)
+                unique_urls.append(url)
+
+        return unique_urls
 
     async def scrape_all_products(self, batch_size: int = 10, limit: Optional[int] = None) -> int:
         """Scrape all products from Footshop EU."""
