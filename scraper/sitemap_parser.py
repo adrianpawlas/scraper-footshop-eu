@@ -51,6 +51,8 @@ class SitemapParser:
 
         except requests.RequestException as e:
             logger.error(f"Failed to fetch sitemap: {e}")
+            if hasattr(e, 'response') and e.response and e.response.status_code == 403:
+                logger.warning("Sitemap blocked (403). Consider implementing alternative URL discovery method.")
             raise
         except ET.ParseError as e:
             logger.error(f"Failed to parse sitemap XML: {e}")

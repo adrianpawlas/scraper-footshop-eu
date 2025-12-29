@@ -99,6 +99,19 @@ You can manually trigger the scraper from the Actions tab:
 - **Timeout**: 12 hours maximum per run
 - **Artifacts**: Logs and run summaries are automatically saved
 
+#### Troubleshooting
+
+**403 Forbidden Errors:**
+If you encounter 403 errors on the sitemap or product pages, this is likely due to IP blocking by Footshop. The scraper includes browser-like headers to minimize this, but if issues persist:
+
+1. **Check logs**: Look for "Sitemap blocked (403)" messages
+2. **Alternative approach**: May need to implement product URL discovery via Footshop's main pages instead of sitemap
+3. **Rate limiting**: The scraper includes built-in delays to avoid triggering blocks
+
+**SigLIP Model Issues:**
+- Ensure all dependencies are installed: `sentencepiece`, `protobuf`, updated `transformers`
+- Model loading requires ~2GB RAM and may be slow on CPU-only environments
+
 ## Usage
 
 ### Full Scraping
