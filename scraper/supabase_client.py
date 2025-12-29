@@ -19,14 +19,19 @@ class SupabaseClient:
                 SUPABASE_KEY,
                 options={"auto_refresh_token": False, "persist_session": False}
             )
-        except TypeError as e:
-            if "proxy" in str(e):
+        except (TypeError, Exception) as e:
+            logger.warning(f"Supabase client creation failed: {e}")
+            logger.warning("Attempting fallback client creation...")
+
+            try:
                 # Try creating client without options
-                logger.warning("Falling back to basic client creation due to proxy parameter issue")
                 from supabase import Client
                 self.client = Client(SUPABASE_URL, SUPABASE_KEY)
-            else:
-                raise e
+                logger.info("Fallback client creation successful")
+            except Exception as fallback_e:
+                logger.error(f"Fallback client creation also failed: {fallback_e}")
+                logger.error("Supabase client initialization failed - scraper cannot continue")
+                raise RuntimeError(f"Cannot initialize Supabase client: {e} -> {fallback_e}")
 
         self.table_name = TABLE_NAME
 
