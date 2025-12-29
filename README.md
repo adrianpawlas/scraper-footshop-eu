@@ -5,7 +5,7 @@ A comprehensive scraper for Footshop EU that extracts product information, gener
 ## Features
 
 - 🛍️ Scrapes all products from Footshop EU
-- 🖼️ Downloads product images and generates 768-dimensional embeddings using Google SigLIP
+- 🖼️ Downloads product images and generates **MANDATORY** 768-dimensional embeddings using Google SigLIP
 - 🗄️ Stores data in Supabase with full product schema
 - 🔄 Handles rate limiting and retries
 - 📊 Progress tracking and error handling
@@ -152,13 +152,14 @@ The scraper consists of several components:
 
 - Python 3.8+
 - CUDA-compatible GPU (recommended for embedding generation)
+- **CRITICAL**: SigLIP model `google/siglip-base-patch16-384` **MUST** load successfully
 - Supabase account with vector extension enabled
 - Sufficient disk space for image processing
 
 ## Notes
 
 - The scraper respects Footshop's robots.txt
-- Image embeddings use the `google/siglip-base-patch16-384` model
+- **MANDATORY**: Image embeddings use `google/siglip-base-patch16-384` model only (no fallbacks)
 - Products are uniquely identified by `(source, product_url)` combination
 - The scraper can resume interrupted runs (products are upserted)
 
@@ -167,7 +168,8 @@ The scraper consists of several components:
 1. **CUDA out of memory**: Reduce batch size or use CPU-only mode
 2. **Rate limiting**: Increase `RATE_LIMIT_DELAY` in config
 3. **Database connection issues**: Verify Supabase credentials
-4. **Missing embeddings**: Check GPU availability and model loading
+4. **SigLIP loading failure**: Check transformers version (>=4.44.0) and internet connection
+5. **Embeddings are MANDATORY**: Scraper **FAILS** if SigLIP cannot generate embeddings (no fallbacks)
 
 ## Contributing
 
