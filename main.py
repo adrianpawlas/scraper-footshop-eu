@@ -70,15 +70,20 @@ class FootshopScraper:
                 # Extract image URLs
                 image_urls = self._extract_image_urls(product_data)
 
-                # Process images and generate embedding
-                image_url, embedding = self.image_processor.process_product_images(image_urls)
+                try:
+                    # Process images and generate SigLIP embedding (REQUIRED)
+                    image_url, embedding = self.image_processor.process_product_images(image_urls)
 
-                # Map data to database schema
-                mapped_product = self.data_mapper.map_product_data(
-                    product_data, image_url, embedding
-                )
+                    # Map data to database schema
+                    mapped_product = self.data_mapper.map_product_data(
+                        product_data, image_url, embedding
+                    )
 
-                processed_products.append(mapped_product)
+                    processed_products.append(mapped_product)
+                except RuntimeError as e:
+                    logger.error(f"CRITICAL: Failed to generate embedding for product {product_data.get('name', 'Unknown')}: {e}")
+                    logger.error("Skipping product - embeddings are mandatory")
+                    continue
 
                 # Rate limiting
                 await asyncio.sleep(RATE_LIMIT_DELAY)
@@ -163,9 +168,14 @@ class FootshopScraper:
             logger.error("Failed to scrape product")
             return False
 
-        # Process images
+        # Process images and generate SigLIP embedding (REQUIRED)
         image_urls = self._extract_image_urls(raw_product)
-        image_url, embedding = self.image_processor.process_product_images(image_urls)
+        try:
+            image_url, embedding = self.image_processor.process_product_images(image_urls)
+        except RuntimeError as e:
+            logger.error(f"CRITICAL: Failed to generate SigLIP embedding: {e}")
+            logger.error("Cannot continue - embeddings are mandatory")
+            return False
 
         # Map data
         mapped_product = self.data_mapper.map_product_data(raw_product, image_url, embedding)

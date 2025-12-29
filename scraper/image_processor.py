@@ -1,7 +1,7 @@
 import requests
 import torch
 from PIL import Image
-from transformers import AutoProcessor, AutoModel, SiglipImageProcessor, CLIPProcessor, CLIPModel
+from transformers import AutoProcessor, AutoModel, SiglipImageProcessor
 from typing import List, Optional, Tuple
 import io
 import os
@@ -20,56 +20,32 @@ class ImageProcessor:
         logger.info(f"Using device: {self.device}")
         self.rate_limiter = RateLimiter(requests_per_second=2.0)  # Higher rate for images
 
-        # Initialize image embedding model (try SigLIP first, then CLIP as fallback)
-        model_configs = [
-            {
-                "name": "SigLIP",
-                "model_name": "google/siglip-base-patch16-384",
-                "processor_class": SiglipImageProcessor,
-                "model_class": AutoModel,
-                "fallback_processor": AutoProcessor
-            },
-            {
-                "name": "CLIP",
-                "model_name": "openai/clip-vit-base-patch32",
-                "processor_class": CLIPProcessor,
-                "model_class": CLIPModel,
-                "fallback_processor": AutoProcessor
-            }
-        ]
+        # Initialize SigLIP model - REQUIRED for embeddings
+        model_name = "google/siglip-base-patch16-384"
 
-        loaded = False
-        for config in model_configs:
+        try:
+            logger.info(f"Loading SigLIP model: {model_name}")
+
+            # Try SigLIP-specific processor first
             try:
-                logger.info(f"Trying to load {config['name']} model: {config['model_name']}")
+                self.processor = SiglipImageProcessor.from_pretrained(model_name)
+                logger.info("Using SigLIP-specific image processor")
+            except Exception as proc_e:
+                logger.warning(f"SigLIP-specific processor failed: {proc_e}, trying AutoProcessor")
+                # Fallback to AutoProcessor
+                self.processor = AutoProcessor.from_pretrained(model_name)
+                logger.info("Using AutoProcessor for SigLIP")
 
-                # Try specific processor first
-                try:
-                    self.processor = config["processor_class"].from_pretrained(config["model_name"])
-                    logger.info(f"Using {config['name']}-specific processor")
-                except Exception as proc_e:
-                    logger.warning(f"{config['name']} specific processor failed: {proc_e}")
-                    # Fallback to AutoProcessor
-                    self.processor = config["fallback_processor"].from_pretrained(config["model_name"])
-                    logger.info(f"Using AutoProcessor for {config['name']}")
+            self.model = AutoModel.from_pretrained(model_name)
+            self.model.to(self.device)
+            self.model.eval()
+            self.model_type = "SigLIP"
+            logger.info("SigLIP model loaded successfully - embeddings will be generated")
 
-                self.model = config["model_class"].from_pretrained(config["model_name"])
-                self.model.to(self.device)
-                self.model.eval()
-                logger.info(f"{config['name']} model loaded successfully")
-                self.model_type = config["name"]
-                loaded = True
-                break
-
-            except Exception as e:
-                logger.warning(f"Failed to load {config['name']} model {config['model_name']}: {e}")
-                continue
-
-        if not loaded:
-            logger.error("All image embedding models failed to load, falling back to mode without embeddings")
-            self.processor = None
-            self.model = None
-            self.model_type = None
+        except Exception as e:
+            logger.error(f"CRITICAL: Failed to load SigLIP model {model_name}: {e}")
+            logger.error("Embeddings are REQUIRED - scraper cannot continue without SigLIP")
+            raise RuntimeError(f"SigLIP model loading failed: {e}. Embeddings are mandatory for this scraper.")
 
     @retry_on_failure(max_attempts=3)
     def download_image(self, image_url: str) -> Optional[Image.Image]:
@@ -96,73 +72,69 @@ class ImageProcessor:
             logger.warning(f"Failed to process image {image_url}: {e}")
             return None
 
-    def generate_embedding(self, image: Image.Image) -> Optional[List[float]]:
-        """Generate embedding for an image using available model."""
+    def generate_embedding(self, image: Image.Image) -> List[float]:
+        """Generate 768-dimensional SigLIP embedding for an image. REQUIRED - no fallbacks."""
         if self.model is None or self.processor is None:
-            logger.warning("No embedding model loaded, skipping embedding generation")
-            return None
+            raise RuntimeError("SigLIP model not loaded - embeddings are mandatory")
+
+        if self.model_type != "SigLIP":
+            raise RuntimeError("Only SigLIP embeddings are supported - no fallbacks allowed")
 
         try:
             # Preprocess image
             inputs = self.processor(images=image, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            # Generate embedding based on model type
+            # Generate SigLIP embedding
             with torch.no_grad():
-                if self.model_type == "SigLIP":
-                    outputs = self.model(**inputs)
-                    # Use the pooled output for image embeddings
-                    embedding = outputs.pooler_output.squeeze().cpu().numpy()
-                elif self.model_type == "CLIP":
-                    outputs = self.model.get_image_features(**inputs)
-                    # CLIP returns features directly
-                    embedding = outputs.squeeze().cpu().numpy()
-                else:
-                    # Fallback for other models
-                    outputs = self.model(**inputs)
-                    embedding = outputs.pooler_output.squeeze().cpu().numpy()
+                outputs = self.model(**inputs)
+                # Use the pooled output for image embeddings
+                embedding = outputs.pooler_output.squeeze().cpu().numpy()
 
             # Ensure we have a 1D array
             if embedding.ndim > 1:
                 embedding = embedding.flatten()
 
-            # Log embedding dimension
-            logger.debug(f"Generated embedding with dimension: {len(embedding)}")
+            # Verify correct dimension (768 for siglip-base-patch16-384)
+            if len(embedding) != EMBEDDING_DIM:
+                raise ValueError(f"SigLIP embedding dimension mismatch: got {len(embedding)}, expected {EMBEDDING_DIM}")
 
+            logger.debug(f"Generated SigLIP embedding with {len(embedding)} dimensions")
             return embedding.tolist()
 
         except Exception as e:
-            logger.error(f"Failed to generate embedding: {e}")
-            return None
+            logger.error(f"CRITICAL: Failed to generate SigLIP embedding: {e}")
+            raise RuntimeError(f"SigLIP embedding generation failed: {e}")
 
-    def process_product_images(self, image_urls: List[str]) -> Tuple[Optional[str], Optional[List[float]]]:
+    def process_product_images(self, image_urls: List[str]) -> Tuple[str, List[float]]:
         """
-        Process product images: download first available image and generate embedding.
+        Process product images: download first available image and generate SigLIP embedding.
+        REQUIRED - fails if no embedding can be generated.
         Returns (image_url, embedding)
         """
         if not image_urls:
-            return None, None
+            raise RuntimeError("No image URLs provided - cannot generate embeddings")
 
         # Try to download and process each image until successful
         for image_url in image_urls:
             image = self.download_image(image_url)
             if image:
-                # Resize image to required size
+                # Resize image to required size for SigLIP
                 image = image.resize(IMAGE_SIZE, Image.Resampling.LANCZOS)
 
-                # Generate embedding
-                embedding = self.generate_embedding(image)
-
-                if embedding:
-                    logger.info(f"Successfully processed image: {image_url}")
+                try:
+                    # Generate SigLIP embedding (required)
+                    embedding = self.generate_embedding(image)
+                    logger.info(f"Successfully generated SigLIP embedding for image: {image_url}")
                     return image_url, embedding
-                else:
-                    logger.warning(f"Failed to generate embedding for image: {image_url}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate SigLIP embedding for image {image_url}: {e}")
+                    continue
             else:
                 logger.warning(f"Failed to download image: {image_url}")
 
-        logger.warning("Failed to process any images for product")
-        return None, None
+        # If we get here, no images worked
+        raise RuntimeError(f"CRITICAL: Failed to generate SigLIP embeddings for any of the {len(image_urls)} image URLs. Embeddings are mandatory.")
 
     def create_compressed_image_url(self, image_url: str) -> str:
         """Create a compressed version URL (if Footshop provides one)."""

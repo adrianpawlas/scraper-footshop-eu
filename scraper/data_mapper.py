@@ -8,9 +8,19 @@ logger = logging.getLogger(__name__)
 class DataMapper:
     """Maps scraped product data to database schema."""
 
-    def map_product_data(self, raw_data: Dict[str, Any], image_url: Optional[str] = None,
-                        embedding: Optional[List[float]] = None) -> Dict[str, Any]:
+    def map_product_data(self, raw_data: Dict[str, Any], image_url: str,
+                        embedding: List[float]) -> Dict[str, Any]:
         """Map raw scraped data to database schema."""
+
+        # Validate required parameters
+        if not embedding:
+            raise ValueError("Embedding is required - cannot map product data without SigLIP embedding")
+
+        if len(embedding) != 768:
+            raise ValueError(f"SigLIP embedding must be 768 dimensions, got {len(embedding)}")
+
+        if not image_url:
+            raise ValueError("Image URL is required - cannot map product data without image")
 
         # Generate unique ID
         product_id = self._generate_product_id(raw_data)

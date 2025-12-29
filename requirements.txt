@@ -3,7 +3,7 @@ beautifulsoup4==4.12.2
 lxml==4.9.3
 supabase==2.3.0
 python-dotenv==1.0.0
-transformers>=4.40.0
+transformers>=4.44.0
 torch>=2.1.2
 Pillow==10.1.0
 tqdm==4.66.1
