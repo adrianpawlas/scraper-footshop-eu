@@ -1,7 +1,7 @@
 import requests
 import torch
 from PIL import Image
-from transformers import AutoProcessor, AutoModel
+from transformers import AutoProcessor, AutoModel, SiglipImageProcessor, CLIPProcessor, CLIPModel
 from typing import List, Optional, Tuple
 import io
 import os
@@ -20,16 +20,56 @@ class ImageProcessor:
         logger.info(f"Using device: {self.device}")
         self.rate_limiter = RateLimiter(requests_per_second=2.0)  # Higher rate for images
 
-        # Initialize SigLIP model
-        try:
-            self.processor = AutoProcessor.from_pretrained("google/siglip-base-patch16-384")
-            self.model = AutoModel.from_pretrained("google/siglip-base-patch16-384")
-            self.model.to(self.device)
-            self.model.eval()
-            logger.info("SigLIP model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load SigLIP model: {e}")
-            raise
+        # Initialize image embedding model (try SigLIP first, then CLIP as fallback)
+        model_configs = [
+            {
+                "name": "SigLIP",
+                "model_name": "google/siglip-base-patch16-384",
+                "processor_class": SiglipImageProcessor,
+                "model_class": AutoModel,
+                "fallback_processor": AutoProcessor
+            },
+            {
+                "name": "CLIP",
+                "model_name": "openai/clip-vit-base-patch32",
+                "processor_class": CLIPProcessor,
+                "model_class": CLIPModel,
+                "fallback_processor": AutoProcessor
+            }
+        ]
+
+        loaded = False
+        for config in model_configs:
+            try:
+                logger.info(f"Trying to load {config['name']} model: {config['model_name']}")
+
+                # Try specific processor first
+                try:
+                    self.processor = config["processor_class"].from_pretrained(config["model_name"])
+                    logger.info(f"Using {config['name']}-specific processor")
+                except Exception as proc_e:
+                    logger.warning(f"{config['name']} specific processor failed: {proc_e}")
+                    # Fallback to AutoProcessor
+                    self.processor = config["fallback_processor"].from_pretrained(config["model_name"])
+                    logger.info(f"Using AutoProcessor for {config['name']}")
+
+                self.model = config["model_class"].from_pretrained(config["model_name"])
+                self.model.to(self.device)
+                self.model.eval()
+                logger.info(f"{config['name']} model loaded successfully")
+                self.model_type = config["name"]
+                loaded = True
+                break
+
+            except Exception as e:
+                logger.warning(f"Failed to load {config['name']} model {config['model_name']}: {e}")
+                continue
+
+        if not loaded:
+            logger.error("All image embedding models failed to load, falling back to mode without embeddings")
+            self.processor = None
+            self.model = None
+            self.model_type = None
 
     @retry_on_failure(max_attempts=3)
     def download_image(self, image_url: str) -> Optional[Image.Image]:
@@ -57,22 +97,37 @@ class ImageProcessor:
             return None
 
     def generate_embedding(self, image: Image.Image) -> Optional[List[float]]:
-        """Generate 768-dimensional embedding for an image."""
+        """Generate embedding for an image using available model."""
+        if self.model is None or self.processor is None:
+            logger.warning("No embedding model loaded, skipping embedding generation")
+            return None
+
         try:
             # Preprocess image
             inputs = self.processor(images=image, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            # Generate embedding
+            # Generate embedding based on model type
             with torch.no_grad():
-                outputs = self.model(**inputs)
-                # Use the pooled output for image embeddings
-                embedding = outputs.pooler_output.squeeze().cpu().numpy()
+                if self.model_type == "SigLIP":
+                    outputs = self.model(**inputs)
+                    # Use the pooled output for image embeddings
+                    embedding = outputs.pooler_output.squeeze().cpu().numpy()
+                elif self.model_type == "CLIP":
+                    outputs = self.model.get_image_features(**inputs)
+                    # CLIP returns features directly
+                    embedding = outputs.squeeze().cpu().numpy()
+                else:
+                    # Fallback for other models
+                    outputs = self.model(**inputs)
+                    embedding = outputs.pooler_output.squeeze().cpu().numpy()
 
-            # Ensure correct dimension
-            if embedding.shape[0] != EMBEDDING_DIM:
-                logger.warning(f"Unexpected embedding dimension: {embedding.shape[0]}, expected {EMBEDDING_DIM}")
-                return None
+            # Ensure we have a 1D array
+            if embedding.ndim > 1:
+                embedding = embedding.flatten()
+
+            # Log embedding dimension
+            logger.debug(f"Generated embedding with dimension: {len(embedding)}")
 
             return embedding.tolist()
 

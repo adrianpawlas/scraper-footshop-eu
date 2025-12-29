@@ -61,9 +61,12 @@ jobs:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       run: |
-        if [ "${{ github.event.inputs.mode }}" == "test" ]; then
-          echo "Running in test mode with limit ${{ github.event.inputs.test_limit }}"
-          python main.py --mode full --batch-size 5 --limit ${{ github.event.inputs.test_limit }}
+        MODE="${{ github.event.inputs.mode }}"
+        if [ "$MODE" == "test" ]; then
+          TEST_LIMIT="${{ github.event.inputs.test_limit }}"
+          if [ -z "$TEST_LIMIT" ]; then TEST_LIMIT="50"; fi
+          echo "Running in test mode with limit $TEST_LIMIT"
+          python main.py --mode full --batch-size 5 --limit $TEST_LIMIT
         else
           BATCH_SIZE="${{ github.event.inputs.batch_size }}"
           LIMIT="${{ github.event.inputs.limit }}"
