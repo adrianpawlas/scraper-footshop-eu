@@ -12,7 +12,22 @@ class SupabaseClient:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
 
-        self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # Create client with explicit options to avoid proxy issues
+        try:
+            self.client: Client = create_client(
+                SUPABASE_URL,
+                SUPABASE_KEY,
+                options={"auto_refresh_token": False, "persist_session": False}
+            )
+        except TypeError as e:
+            if "proxy" in str(e):
+                # Try creating client without options
+                logger.warning("Falling back to basic client creation due to proxy parameter issue")
+                from supabase import Client
+                self.client = Client(SUPABASE_URL, SUPABASE_KEY)
+            else:
+                raise e
+
         self.table_name = TABLE_NAME
 
     def insert_product(self, product_data: Dict[str, Any]) -> bool:
