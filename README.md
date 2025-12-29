@@ -99,18 +99,31 @@ You can manually trigger the scraper from the Actions tab:
 - **Timeout**: 12 hours maximum per run
 - **Artifacts**: Logs and run summaries are automatically saved
 
-#### Troubleshooting
+#### Important: Footshop Blocking
 
-**403 Forbidden Errors:**
-If you encounter 403 errors on the sitemap or product pages, this is likely due to IP blocking by Footshop. The scraper includes browser-like headers to minimize this, but if issues persist:
+**⚠️ CRITICAL ISSUE: Footshop blocks all automated access**
 
-1. **Check logs**: Look for "Sitemap blocked (403)" messages
-2. **Alternative approach**: May need to implement product URL discovery via Footshop's main pages instead of sitemap
-3. **Rate limiting**: The scraper includes built-in delays to avoid triggering blocks
+Footshop has implemented aggressive bot detection that blocks:
+- XML sitemaps (403 Forbidden)
+- Category pages (400 Bad Request)
+- Individual product pages (403 Forbidden)
 
-**SigLIP Model Issues:**
-- Ensure all dependencies are installed: `sentencepiece`, `protobuf`, updated `transformers`
-- Model loading requires ~2GB RAM and may be slow on CPU-only environments
+**Even with proper browser headers, the scraper cannot access Footshop content.**
+
+### Alternative Solutions:
+
+1. **Footshop API**: Check if Footshop provides an official API for partners
+2. **Residential Proxies**: Use residential IP addresses instead of datacenter IPs
+3. **Different Data Source**: Consider alternative fashion retailers with less restrictive policies
+4. **Partnership**: Contact Footshop directly for data access partnership
+
+### Current Status:
+- ✅ **SigLIP embeddings**: Fully working
+- ✅ **Supabase integration**: Working with service role key
+- ❌ **Footshop access**: Blocked by anti-bot measures
+- ❌ **Data collection**: Not possible with current approach
+
+**The scraper architecture is sound, but Footshop's blocking prevents data collection.**
 
 ## Usage
 
